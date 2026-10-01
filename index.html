@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>꼬리자르기 대소동</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<style>
+:root{--ink:#fff8e1;--gold:#ffd23f;--leaf:#0b3a18;--panel:rgba(6,32,14,.86);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#fff8e1;--gold:#ffd23f;--leaf:#0b3a18;--panel:rgba(6,32,14,.86)}}
+:root[data-theme="dark"]{--ink:#fff8e1;--gold:#ffd23f;--leaf:#0b3a18;--panel:rgba(6,32,14,.86)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;background:#06240f;overflow:hidden;font-family:"Jua","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none;touch-action:manipulation}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;display:none;justify-content:center;gap:10px;padding:10px;pointer-events:none}
+#hud div{background:var(--panel);border:2px solid var(--gold);border-radius:14px;padding:6px 14px;text-align:center;min-width:76px;font-size:13px;line-height:1.2}
+#hud b{display:block;font-size:24px;font-weight:400;color:var(--gold)}
+#bonus{position:fixed;right:10px;top:calc(env(safe-area-inset-top,0px) + 86px);display:none;background:#ffd23f;color:#3a2300;border-radius:14px;padding:7px 12px;font-size:17px;box-shadow:0 4px 0 #b8861b;pointer-events:none;transform-origin:right top}
+#bonus.hit{animation:bp .35s}
+@keyframes bp{0%{transform:scale(1.5)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){#bonus.hit{animation:none}}
+.ov{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(4,24,10,.72);text-align:center;padding:20px}
+.box{background:var(--panel);border:3px solid var(--gold);border-radius:24px;padding:26px 28px;max-width:340px}
+h1{font-weight:400;font-size:38px;margin:0 0 6px;color:var(--gold);line-height:1.15}
+h2{font-weight:400;font-size:32px;margin:0 0 6px;color:var(--gold)}
+p{margin:8px 0;font-size:16px;line-height:1.5}
+.big{font-size:54px;color:var(--gold);margin:4px 0}
+button{margin-top:14px;background:var(--gold);color:#3a2300;border:0;border-radius:999px;padding:14px 40px;font:inherit;font-size:22px;cursor:pointer;box-shadow:0 5px 0 #b8861b}
+button:active{transform:translateY(3px);box-shadow:0 2px 0 #b8861b}
+button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div>점수<b id="hs">0</b></div><div>남은 시간<b id="ht">60</b></div><div>살아남은 횟수<b id="hc">0</b></div></div>
+
+<div id="bonus"></div>
+<div class="ov" id="start" style="display:flex"><div class="box">
+<div style="font-size:44px">🦎✂️🦅</div>
+<h1>꼬리자르기 대소동</h1>
+<p>위에서 내려오는 새 발톱이 꼬리에 닿기 <b>직전</b>에 탭해서 꼬리를 끊고 도망치세요!</p>
+<p>너무 빨라도, 늦어도 점수가 줄고 꼬리가 자라는 동안엔 끊을 수 없어요. 1분 동안 몇 번 살아남을 수 있을까요?</p>
+<p style="font-size:14px;opacity:.85">터치 · 마우스 클릭 · 스페이스바</p>
+<button id="go">시작하기</button></div></div>
+
+<div class="ov" id="over"><div class="box">
+<h2 id="ot">게임 오버</h2>
+<p id="os"></p>
+<div class="big" id="oscore">0점</div>
+<p id="otier"></p>
+<p id="oc"></p>
+<button id="again">다시 하기</button></div></div>
+
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),$=id=>document.getElementById(id);
+let W,H,S,OX,OY,dpr;
+function rs(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;S=Math.min(W/400,H/700);OX=(W-400*S)/2;OY=(H-700*S)/2}
+addEventListener('resize',rs);rs();
+
+const TY=560,BX=150,AY=TY+20,GRACE=0.06;
+// 6단계 새: 처음엔 금방 바뀌고, 뒤로 갈수록 바뀌는 데 더 많은 횟수가 필요 (뒤로 갈수록 크고 빠름)
+const FROM=[0,3,7,12,19,28];
+const BIRDS=[['병아리','🐣',38],['참새','🐦',46],['앵무새','🦜',56],['오리','🦆',66],['부엉이','🦉',80],['독수리','🦅',94]].map(([n,e,s],i)=>({n,e,s,leg:Math.round(s*.9),from:FROM[i],base:1.7-i*0.15}));
+let st='start',elapsed=0,score=0,cuts=0,sloppy=0,combo=0,lastTier=0,claw=null,leavers=[],pieces=[],popups=[],tailFrac=1,growT=0,curR=1,spawnIn=0.8,hop=0,shake=0,dyT=0,reason='',T=0;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const tierOf=()=>{let t=0;BIRDS.forEach((b,i)=>{if(cuts>=b.from)t=i});return t};
+const ls=()=>0.6+Math.min(cuts,25)*0.026;                 // 도마뱀 크기: 살아남을수록 커짐
+const tipX=()=>BX+170*ls(),tipY=()=>AY-12*ls();           // 꼬리 끝 위치
+const tgt=u=>({x:BX+170*ls()*u,y:AY+ls()*(-22+10*u)});    // 꼬리 위의 지점(u: 0=시작, 1=끝)
+const SPOTS=[0.2,0.55,1];                                  // 꼬리 시작·중간·끝
+const Dur=t=>Math.max(0.55,BIRDS[t].base-elapsed*0.004-sloppy);   // 발톱이 내려오는 시간
+const Reg=()=>(0.5+Math.min(cuts,30)*0.012)*Math.max(0.4,1-0.12*combo); // 꼬리 재생 시간: 클수록 느림, 연속 정확하면 보너스
+
+function setBonus(hit){const b=$('bonus');if(combo<1){b.style.display='none';return}
+ b.textContent=combo===1?'꼬리 재생 속도 up!':'꼬리 재생 속도 up! x '+combo;b.style.display='block';
+ if(hit){b.classList.remove('hit');void b.offsetWidth;b.classList.add('hit')}}
+function startGame(){st='play';elapsed=0;score=0;cuts=0;sloppy=0;combo=0;lastTier=0;claw=null;leavers=[];pieces=[];popups=[];tailFrac=1;growT=0;spawnIn=0.8;hop=0;shake=0;
+ setBonus(false);$('start').style.display='none';$('over').style.display='none';$('hud').style.display='flex';last=performance.now()}
+function spawn(){const t=tierOf();claw={t:0,D:Dur(t),dx:rnd(-110,110),tier:t,u:SPOTS[Math.floor(Math.random()*3)]};
+ if(t>lastTier){lastTier=t;pop(BIRDS[t].e+' '+BIRDS[t].n+' 등장!',200,150,'#ffe66d')}}
+function pos(c){const p=Math.min(c.t/c.D,1),g=tgt(c.u);return{x:Math.max(20,Math.min(380,g.x+c.dx*(1-p))),y:-60+(g.y+60)*p}}
+function pop(txt,x,y,col){popups.push({txt,x,y,col,life:1})}
+
+function tap(){
+ if(st!=='play'||!claw)return;
+ if(tailFrac<1){pop('꼬리가 아직 자라는 중!',200,TY-90,'#ffb3a0');return}
+ const rem=claw.D-claw.t;let sc,label;
+ if(rem<=0){sc=60;label='아슬아슬!'}
+ else if(rem<=0.12){sc=100;label='완벽해요!'}
+ else{sc=Math.max(10,Math.round(100-(rem-0.12)*200));label=sc>=90?'완벽해요!':sc>=80?'좋아요!':sc>=50?'조금 일러요':'너무 빨라요!'}
+ if(sc<80)sloppy=Math.min(0.45,sloppy+0.03);else if(sc===100)sloppy=Math.max(0,sloppy-0.01);
+ if(sc>=90)combo++;else combo=0;       // 정확하게 연속으로 자르면 재생 보너스
+ setBonus(true);
+ score+=sc;cuts++;
+ const p=pos(claw);const g=tgt(claw.u);pieces.push({x:g.x,y:g.y,vy:0,u:claw.u,k:ls(),life:1.3});   // 잘린 꼬리는 그 자리에서 떨어짐
+ leavers.push({x:p.x,y:p.y,tier:claw.tier,hx:Math.max(20,Math.min(380,g.x+claw.dx))}); // 새는 빈 발톱으로 온 길을 되돌아 올라감
+ pop(label+' +'+sc,tipX()-30,tipY()-70,sc>=80?'#ffe66d':'#ffffff');
+ claw=null;tailFrac=0.12;growT=0;curR=Reg();spawnIn=rnd(0.1,0.5);hop=0.3;
+}
+function end(r){
+ if(st!=='play')return;reason=r;
+ if(r==='time'){show();return}
+ st='dying';dyT=0.8;shake=0.5;if(claw)claw.t=claw.D;
+}
+function show(){
+ st='over';$('hud').style.display='none';$('bonus').style.display='none';
+ const m={time:['시간 종료!','1분 동안 버텨냈어요!'],miss:['꼬리를 못 잘랐어요!','발톱에 잡혀서 게임 오버…'],grow:['꼬리가 아직 안 자랐어요!','무방비 상태로 잡혀서 게임 오버…']}[reason];
+ $('ot').textContent=m[0];$('os').textContent=m[1];$('oscore').textContent=score+'점';{const b=BIRDS[tierOf()];$('otier').textContent='당신은 '+b.e+' '+b.n+' 티어입니다.'}$('oc').textContent='살아남은 횟수: '+cuts+'번';
+ $('over').style.display='flex';
+}
+
+function update(dt){
+ T+=dt;
+ if(hop>0)hop-=dt;if(shake>0)shake-=dt;
+ popups.forEach(p=>{p.life-=dt*1.1;p.y-=40*dt});popups=popups.filter(p=>p.life>0);
+ leavers.forEach(l=>{l.y-=1100*dt;l.x+=(l.hx-l.x)*Math.min(1,dt*4)});
+ pieces.forEach(p=>{p.vy+=900*dt;p.y+=p.vy*dt;p.life-=dt});pieces=pieces.filter(p=>p.life>0);
+ leavers=leavers.filter(l=>l.y>-200);
+ if(st==='dying'){dyT-=dt;if(dyT<=0)show();return}
+ if(st!=='play')return;
+ elapsed+=dt;if(elapsed>=60){elapsed=60;end('time');return}
+ if(tailFrac<1){growT+=dt;tailFrac=Math.min(1,0.12+0.88*growT/curR)}
+ if(!claw){spawnIn-=dt;if(spawnIn<=0)spawn()}
+ else{claw.t+=dt;
+  if(tailFrac<1&&claw.t>=claw.D)end('grow');
+  else if(claw.t>=claw.D+GRACE)end('miss');
+ }
+ $('hs').textContent=score;$('hc').textContent=cuts;$('ht').textContent=Math.ceil(60-elapsed);
+}
+
+function emoji(t,x,y,s,r=0){ctx.save();ctx.translate(x,y);ctx.rotate(r);ctx.font=s+'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,0,0);ctx.restore()}
+function circ(x,y,r,c){ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill()}
+const under=x=>AY+72-(x-30)*48/355;
+
+function bg(){
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#06240f');g.addColorStop(.5,'#14602b');g.addColorStop(1,'#2d8a4a');
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ ctx.setTransform(dpr*S,0,0,dpr*S,dpr*OX,dpr*OY);
+ if(shake>0)ctx.translate(rnd(-6,6),rnd(-6,6));
+ ctx.globalAlpha=.5;ctx.fillStyle='#2a1a0c';ctx.fillRect(352,-600,70,2400);ctx.globalAlpha=1;
+ ctx.fillStyle='#3a2512';ctx.fillRect(-30,-600,90,2400);ctx.fillStyle='#4e3319';ctx.fillRect(-12,-600,16,2400);
+ [-110,-40,440,510].forEach((x,i)=>emoji('🌴',x,300+i%2*50,150+i%2*30,Math.sin(T+i)*.04));
+ emoji('🌴',372,380,110,Math.sin(T*1.1+2)*.05);
+ ctx.strokeStyle='#2f9a3f';ctx.lineWidth=4;
+ [110,180,260,330].forEach((x,i)=>{const L=130+i*37,sw=Math.sin(T*.8+i)*8;ctx.beginPath();ctx.moveTo(x,-100);ctx.quadraticCurveTo(x+sw*2,L/2,x+sw,L);ctx.stroke();circ(x+sw,L,7,'#4fc05a')});
+ ctx.fillStyle='#0a3a17';for(let x=-80;x<=480;x+=45){ctx.beginPath();ctx.ellipse(x,-8+Math.sin(T+x)*6,48,34,0,0,7);ctx.fill()}
+ // 땅은 없고 아주 아래에 안개 낀 숲 → 높은 나뭇가지 느낌
+ const m=ctx.createLinearGradient(0,540,0,780);m.addColorStop(0,'rgba(159,216,178,0)');m.addColorStop(1,'rgba(159,216,178,.92)');
+ ctx.fillStyle=m;ctx.fillRect(-700,540,1800,1800);
+ ctx.globalAlpha=.5;for(let x=-80;x<=480;x+=64)emoji('🌳',x,712+(x%3)*8,96);ctx.globalAlpha=1;
+ // 배경 동물들
+ const mx=82,my=320+Math.sin(T*2)*10;ctx.strokeStyle='#2f9a3f';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(mx,-100);ctx.lineTo(mx,my-20);ctx.stroke();emoji('🐒',mx,my,58,Math.sin(T*2)*.12);
+ emoji('🦋',((T*40)%560)-80,170+Math.sin(T*3)*20,30);
+ emoji('🦎',372,470,34,-.5);
+ emoji('🐛',22,620-((T*10)%220),30,-1.57);
+ // 큰 나뭇가지 (도마뱀이 서 있는 곳)
+ ctx.fillStyle='#5b3a1b';ctx.beginPath();ctx.moveTo(20,AY);ctx.lineTo(385,AY+6);ctx.quadraticCurveTo(400,AY+16,385,AY+24);ctx.lineTo(30,AY+72);ctx.lineTo(20,AY+72);ctx.closePath();ctx.fill();
+ ctx.lineCap='round';ctx.strokeStyle='#3d2610';ctx.lineWidth=3;
+ for(let i=0;i<5;i++){const x=70+i*62;ctx.beginPath();ctx.moveTo(x,AY+14);ctx.lineTo(x+34,under(x+34)-12);ctx.stroke()}
+ ctx.strokeStyle='#4fc05a';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(30,AY+2);ctx.lineTo(380,AY+8);ctx.stroke();
+ ctx.strokeStyle='#2f9a3f';ctx.lineWidth=4;
+ [110,215,310].forEach((x,i)=>{const y0=under(x),sw=Math.sin(T+i*2)*6;ctx.beginPath();ctx.moveTo(x,y0);ctx.quadraticCurveTo(x+sw,y0+60,x+sw*1.5,y0+110+i*14);ctx.stroke();emoji('🍃',x+sw*1.5,y0+112+i*14,22,.5)});
+ emoji('🍃',350,AY-2,26,.6);
+}
+
+function tailPts(frac,wag){const a=[];for(let i=0;i<=22;i++){const u=i/22;a.push({x:BX+170*frac*u,y:TY-2+Math.sin(u*4+T*3)*5*frac*wag+u*10*frac,r:11*(1-u)+2})}return a}
+function drawTail(pts,hy,col){pts.forEach((p,i)=>circ(p.x,p.y+hy*(1-i/22),p.r,i%4===0?'#4fae3a':col))}
+
+function lizard(){
+ const k=ls();ctx.save();ctx.translate(BX,AY);ctx.scale(k,k);ctx.translate(-BX,-AY);
+ const hy=hop>0?-Math.sin(hop/0.3*Math.PI)*22:0;
+ const near=claw&&tailFrac>=1&&claw.D-claw.t<0.35;
+ const pts=tailPts(tailFrac,near?0.3:1);if(near)pts.forEach(p=>p.y+=Math.sin(T*70)*1.6);
+ drawTail(pts,hy,'#6ccf4a');
+ ctx.fillStyle='#4fae3a';[85,130].forEach(x=>{ctx.beginPath();ctx.ellipse(x,TY+14+hy,10,6,0,0,7);ctx.fill()});
+ ctx.fillStyle='#6ccf4a';ctx.beginPath();ctx.ellipse(108,TY-6+hy,50,22,0,0,7);ctx.fill();
+ [92,114,134].forEach(x=>circ(x,TY-12+hy,5,'#4fae3a'));
+ ctx.fillStyle='#6ccf4a';ctx.beginPath();ctx.ellipse(62,TY-12+hy,22,18,0,0,7);ctx.fill();
+ circ(56,TY-20+hy,6,'#fff');circ(54,TY-20+hy,3,'#111');
+ ctx.strokeStyle='#c0392b';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(41,TY-8+hy);ctx.lineTo(32,TY-4+hy);ctx.stroke();
+ ctx.restore();
+}
+
+function clawDraw(x,y,t){const b=BIRDS[t],k=b.s/64;
+ ctx.lineCap='round';ctx.strokeStyle='#e0a030';ctx.lineWidth=3+t*.7;ctx.beginPath();ctx.moveTo(x,y-b.leg);ctx.lineTo(x,y-14*k);ctx.stroke();
+ ctx.strokeStyle='#2b2b2b';ctx.lineWidth=2+t*.55;
+ [-1,0,1].forEach(a=>{ctx.beginPath();ctx.moveTo(x,y-16*k);ctx.quadraticCurveTo(x+a*20*k,y-4*k,x+a*10*k,y+12*k);ctx.stroke()});
+ emoji(b.e,x,y-b.leg-b.s*.4,b.s);
+}
+function piece(x,y,k,u){for(let i=0;i<12;i++){const v=i/11,u2=u+(1-u)*v;circ(x+170*k*(1-u)*v+Math.sin(T*25+i)*2,y+10*k*(1-u)*v+Math.sin(T*25+i*.8)*3,(11*(1-u2)+2)*k*.9,i%3===0?'#4fae3a':'#6ccf4a')}}
+
+function draw(){
+ bg();lizard();
+ pieces.forEach(p=>{ctx.globalAlpha=Math.min(1,p.life);piece(p.x,p.y,p.k,p.u);ctx.globalAlpha=1});
+ leavers.forEach(l=>clawDraw(l.x,l.y,l.tier));
+ if(claw){const p=pos(claw);clawDraw(p.x,p.y,claw.tier)}
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+ popups.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life);ctx.font='30px "Jua","Noto Sans KR",sans-serif';ctx.lineWidth=6;ctx.strokeStyle='#1b3a12';ctx.strokeText(p.txt,p.x,p.y);ctx.fillStyle=p.col;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1});
+}
+
+let last=performance.now();
+function loop(now){const dt=Math.min(0.05,(now-last)/1000);last=now;update(dt);draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+
+cv.addEventListener('pointerdown',e=>{e.preventDefault();tap()});
+addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'||e.code==='ArrowDown'){if(st==='play'){e.preventDefault();if(!e.repeat)tap()}}});
+$('go').onclick=startGame;$('again').onclick=startGame;
+</script>
+</body>
+</html>
